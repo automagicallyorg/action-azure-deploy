@@ -8,8 +8,6 @@ inputs:
     required: true
   azureSubscriptionId:
     required: true
-  azureSubscriptionId:
-    required: true
   azureLocation:
     required: true
   azureResourceGroupName:
