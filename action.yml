@@ -1,0 +1,85 @@
+name: 'Deploy to environment'
+description: 'Deploy to environment'
+
+inputs:
+  azuerClientId:
+    required: true
+  azureTenantId:
+    required: true
+  azureSubscriptionId:
+    required: true
+  azureSubscriptionId:
+    required: true
+  azureLocation:
+    required: true
+  azureResourceGroupName:
+    required: true
+  azureWebappName:
+    required: true
+  dockerLoginServer:
+    required: true
+  dockerUsername:
+    required: true
+  dockerUserPassword:
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: 'Az CLI login'
+      uses: azure/login@v1
+      with:
+        client-id: ${{ inputs.azuerClientId }}
+        tenant-id: ${{ inputs.azureTenantId }}
+        subscription-id: ${{ inputs.azureSubscriptionId }}
+
+    - name: 'Run az commands'
+      run: |
+        az account show
+        az group list
+
+    # deploy infrastructure with Azure Bicep
+    - name: Deploy infrastructure
+      id: azure-deployment
+      shell: pwsh
+      run: |
+        $deployment = $(az deployment sub create --name ${{ inputs.azureResourceGroupName }} `
+          --location ${{ inputs.azureLocation }} `
+          --template-file ./main.bicep `
+          --parameters location=${{ inputs.azureLocation }} `
+          --parameters rgName=${{ inputs.azureResourceGroupName }} `
+          --parameters webAppName=${{ inputs.azureWebappName }} `
+          --parameters dockerRegistryHost=${{ inputs.dockerLoginServer }} `
+          --parameters dockerRegistryServerUsername=${{ inputs.dockerUsername }} `
+          --parameters dockerRegistryServerPassword=${{ inputs.dockerUserPassword }} `
+          --parameters dockerImage=${{ inputs.dockerLoginServer }}/maxtest1webapp:${{ github.sha }} `
+          --output json) | ConvertFrom-Json
+      working-directory: ./infra/bicep
+
+    # Push container image to Azure WebApp
+    - name: Setup Container
+      id: container-set
+      shell: pwsh
+      run: |
+        $deployment = $(az webapp config container set  --resource-group ${{ inputs.azureResourceGroupName }} `
+          --name ${{ inputs.azureWebappName }} `
+          --docker-custom-image-name ${{ inputs.dockerLoginServer }}/maxtest1webapp:${{ github.sha }} `
+          --docker-registry-server-url https://${{ inputs.dockerLoginServer }} `
+          --docker-registry-server-user ${{ inputs.dockerUsername }} `
+          --docker-registry-server-password ${{ inputs.dockerUserPassword }} `
+          --output json) | ConvertFrom-Json
+      working-directory: ./infra/bicep
+
+    # Get the URL for the Azure WebApp
+    - name: Get the Webapp URL
+      id: get-webapp-url
+      shell: pwsh
+      run: |
+        $appurl = $(az webapp config hostname list `
+          --resource-group ${{ inputs.azureResourceGroupName }} `
+          --webapp-name ${{ inputs.azureWebappName }} `
+          --output json) | ConvertFrom-Json
+        Write-Output "The webapp URL is https://$($appurl.name)"
+        Write-Output "::set-output name=webAppUrl::https://$($appurl.name)"
+      working-directory: ./infra/bicep
